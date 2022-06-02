@@ -20,7 +20,7 @@ from hamcrest import assert_that, equal_to, empty, has_item
 
 @step('an async-step waits {duration:f} seconds')
 @async_run_until_complete
-async def step_async_step_waits_seconds_py35(context, duration): # pylint: disable=W0613
+async def step(context, duration): # pylint: disable=W0613
     '''Simple example of a coroutine as async-step (in Python 3.5)'''
     await asyncio.sleep(duration)
 
@@ -35,14 +35,14 @@ def async_func(param):
     return str(param).upper()
 
 @given('I dispatch an async-call with param "{param}"')
-def step_dispatch_async_call(context, param):
+def step(context, param):
     '''Dispatch one asynchronous function.'''
     async_context = use_or_create_async_context(context, 'async_context1')
     task = async_context.loop.create_task(async_func(param))
     async_context.tasks.append(task)
 
 @then('the collected result of the async-calls is "{expected}"')
-def step_collected_async_call_result_is(context, expected):
+def step(context, expected):
     '''Get the results of an asynchronous function.'''
     async_context = context.async_context1
     done, pending = async_context.loop.run_until_complete(
@@ -66,7 +66,7 @@ class EchoClientProtocol:
         logging.info('__init__')
         self.on_con_lost = on_con_lost
         self.transport = None
-        self.recvd_msgs = []
+        self.recvd_msgs = asyncio.Queue()
 
     def connection_made(self, transport):
         '''Base protcol: Called when a connection is made.'''
@@ -81,7 +81,7 @@ class EchoClientProtocol:
     def datagram_received(self, data, addr):    # pylint: disable=W0613
         '''Datagram protcol: Called when a datagram is received.'''
         logging.info('datagram_received')
-        self.recvd_msgs.append(data.decode())
+        self.recvd_msgs.put_nowait(data.decode())
 
     def error_received(self, exc):              # pylint: disable-msg=R0201,W0613
         '''Datagram protcol: Called when an error is received.'''
@@ -91,6 +91,8 @@ class EchoClientProtocol:
         '''Send a datagram to the server.'''
         logging.info('send_datagram')
         self.transport.sendto(message.encode())
+
+#############################################################
 
 async def start_client(async_context, on_con_lost, object_queue):
     '''Start the echo client'''
@@ -124,7 +126,7 @@ async def send_echo_msg(object_queue, messages):
     return None
 
 @given('the client sends the words "{words}"')
-def step_dispatch_async_call(context, words): # pylint: disable-msg=E0102
+def step(context, words): # pylint: disable-msg=E0102
     '''Start the echo client coroutines'''
     logging.info('sends the words')
     messages = words.split(', ')
@@ -143,7 +145,7 @@ def step_dispatch_async_call(context, words): # pylint: disable-msg=E0102
     async_context.tasks.append(task)
 
 @then('the client will receive the words "{expected}"')
-def step_collected_async_call_result_is(context, expected): # pylint: disable-msg=E0102
+def step(context, expected): # pylint: disable-msg=E0102
     '''Collect the results from the echo coroutines'''
     logging.info('receive the words')
     async_context = context.udp_datagram
@@ -159,4 +161,30 @@ def step_collected_async_call_result_is(context, expected): # pylint: disable-ms
         logging.info(task.result())
         if task.result() is not None:
             for word in expected.split(', '):
-                assert_that(task.result(), has_item(word))
+                assert task.result().get_nowait() == word
+
+#############################################################
+
+@given('the client is started')
+@async_run_until_complete
+async def step_start_client(context):
+    '''Start the echo client'''
+    logging.info('start_client')
+
+    # Save transport and protocol in test scenario context
+    async_context = use_or_create_async_context(context, 'udp_datagram')
+    on_con_lost = async_context.loop.create_future()
+    context.echo_transport, context.echo_protocol = \
+        await async_context.loop.create_datagram_endpoint(
+            lambda: EchoClientProtocol(on_con_lost),
+            remote_addr=('127.0.0.1', 9999))
+
+@then('the client sends the word "{word}"')
+def step(context, word):
+    context.echo_transport.sendto(word.encode())
+
+@then('the client will receive the word "{expected}"')
+@async_run_until_complete(async_context='udp_datagram')
+async def step(context, expected): # pylint: disable-msg=E0102
+    echo_msg = await context.echo_protocol.recvd_msgs.get()
+    assert echo_msg == expected
