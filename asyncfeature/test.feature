@@ -14,12 +14,17 @@ Feature:
 
   Scenario:
     Given the client is started
-    Then the client sends the word "how"
-    Then the client will receive the word "how"
-    Then the client sends the word "now"
-    Then the client will receive the word "now"
-    Then the client sends the word "brown"
-    Then the client will receive the word "brown"
-    Then the client sends the word "cow"
-    Then the client will receive the word "cow"
+    Then the client sends the word "hello"
+    Then the client will receive the word "hello"
+    Then the client sends the word "world"
+    Then the client will receive the word "world"
 
+  Scenario:
+    Given the fixture transport context is available
+    When the client using the fixture transport sends "hello"
+    Then the client using the fixture transport receives "hello"
+
+  Scenario:
+    Given the fixture transport context is available
+    When the client using the fixture transport sends "world"
+    Then the client using the fixture transport receives "world"
